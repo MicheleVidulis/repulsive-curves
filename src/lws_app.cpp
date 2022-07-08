@@ -200,7 +200,8 @@ namespace LWS
     }
 
     CurveIO::writeOBJLineElements(positionFilename.c_str(), all_positions, edges);
-    CurveIO::writeOBJLineElements(tangentFilename.c_str(), all_tangents, edges);
+    if (!tangentFilename.empty())
+      CurveIO::writeOBJLineElements(tangentFilename.c_str(), all_tangents, edges);
   }
 
   void LWSApp::customWindow()
@@ -1010,6 +1011,7 @@ int main(int argc, char **argv)
                               "");
   args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
   args::Positional<string> file(parser, "curve", "Space curve to process");
+  args::Positional<int> maxIter(parser, "maxIter", "Maximum number of iterations");
   // std::cout << "aaa: " << argv[1] << std::endl;
   // args::Positional<string> output_dir(parser, "output directory", "Output directory");
   // args::Positional<string> output_dir(parser, "output directory", "Output directory");
@@ -1055,7 +1057,14 @@ int main(int argc, char **argv)
 
   std::cout << "Set up curve" << std::endl;
   app->initSolver();
+  if (argc >= 2) { // set max num iters from command line
+    std::cout << "Assuming argv[2]=" << argv[2] << " is max number of iterations." << std::endl;
+    app->stepLimit = atoi(argv[2]);
+  }
   std::cout << "Set up solver" << std::endl;
+
+  // std::cout << "tpeAlpha: " << LWS::LWSOptions::tpeAlpha << std::endl;  // default: 3
+  // std::cout << "tpeBeta: " << LWS::LWSOptions::tpeBeta << std::endl;   // default: 6
 
   // if (obstacleFiles)
   // {
@@ -1135,20 +1144,16 @@ int main(int argc, char **argv)
       }
 
       if (!LWS::LWSOptions::runTPE) {
-        // Export result in obj format
-        LWS::SceneData data = LWS::ParseSceneFile(argv[1]);
-        std::vector<string> parts;
-        LWS::splitString(data.curve_filename, parts, '/');
-        std::string knot_type = parts[4];
-        std::string braid_obj = parts[5];
-        std::string output_file = "./output/" + knot_type + "/" + braid_obj;
-        std::string dummy_tangent_flie = "dummy_tangents.obj";
-
-        std::cout << "Knot type: " << knot_type << std::endl;
-        std::cout << "Braid obj: " << braid_obj << std::endl;
-        std::cout << "output_file: " << output_file << std::endl;
-
-        app->writeCurves(app->curves, output_file, dummy_tangent_flie);
+        std::cout << "Assuming argv[1]='" << argv[1] << "' is input file name." << std::endl;
+        std::string input_obj_file = argv[1];
+        // std::string input_path = argv[1];
+        // std::vector<string> parts;
+        // LWS::splitString(input_path, parts, '/');  // split directories
+        // std::string input_obj_file = parts[parts.size()-1];
+        std::string output_obj_file = input_obj_file;
+        output_obj_file.insert(output_obj_file.size()-4, "-repulsed");  // wrwite output in same directory as input after adding suffix
+        std::cout << "Output file: " << output_obj_file << std::endl;
+        app->writeCurves(app->curves, output_obj_file, /*tangentFilename*/"");
       }
     }
   }
