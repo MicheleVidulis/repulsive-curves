@@ -1010,8 +1010,12 @@ int main(int argc, char **argv)
                               "");
   args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
   args::Positional<string> file(parser, "curve", "Space curve to process");
-  args::ValueFlagList<string> obstacleFiles(parser, "obstacles", "Obstacles to add", {'o'});
-  args::ValueFlagList<string> visualizeFiles(parser, "visualize", "Extra meshes to visualize", {'v'});
+  // std::cout << "aaa: " << argv[1] << std::endl;
+  // args::Positional<string> output_dir(parser, "output directory", "Output directory");
+  // args::Positional<string> output_dir(parser, "output directory", "Output directory");
+  // args::ValueFlagList<string> obstacleFiles(parser, "obstacles", "Obstacles to add", {'o'});
+  // args::ValueFlagList<string> visualizeFiles(parser, "visualize", "Extra meshes to visualize", {'v'});
+  args::Flag useGUI(parser, "gui", "Use polyscope or run without gui", {'g', "gui"});
 
   // Parse args
   try
@@ -1037,25 +1041,15 @@ int main(int argc, char **argv)
     return 1;
   }
 
-  // Options
-  polyscope::options::autocenterStructures = false;
-  // polyscope::view::windowWidth = 600;
-  // polyscope::view::windowHeight = 800;
-  polyscope::gl::groundPlaneEnabled = false;
 
   LWS::LWSApp *app = new LWS::LWSApp();
   LWS::LWSApp::instance = app;
 
   std::cout << "Using Eigen version " << EIGEN_WORLD_VERSION << "." << EIGEN_MAJOR_VERSION << "." << EIGEN_MINOR_VERSION << std::endl;
 
-  // Initialize polyscope
-  polyscope::init();
-  // Add a few gui elements
-  polyscope::state::userCallback = &customWindow;
 
   processFile(LWS::LWSApp::instance, file.Get());
 
-  app->DisplayCurves(app->curves, app->curveName);
   // app->curves->PinVertex(10);
   // app->curves->PinTangent(10);
 
@@ -1063,27 +1057,101 @@ int main(int argc, char **argv)
   app->initSolver();
   std::cout << "Set up solver" << std::endl;
 
-  if (obstacleFiles)
-  {
-    for (string obsFile : obstacleFiles)
-    {
-      app->AddMeshObstacle(obsFile, Vector3{0, 0, 0}, 3, 1);
-    }
-  }
-  if (visualizeFiles)
-  {
-    for (string visFile : visualizeFiles)
-    {
-      app->VisualizeMesh(visFile);
-    }
-  }
+  // if (obstacleFiles)
+  // {
+  //   for (string obsFile : obstacleFiles)
+  //   {
+  //     app->AddMeshObstacle(obsFile, Vector3{0, 0, 0}, 3, 1);
+  //   }
+  // }
+  // if (visualizeFiles)
+  // {
+  //   for (string visFile : visualizeFiles)
+  //   {
+  //     app->VisualizeMesh(visFile);
+  //   }
+  // }
 
   // app->AddPlaneObstacle(Vector3{-2, 0, 0}, Vector3{1, 0, 0});
   // app->AddPlaneObstacle(Vector3{2, 0, 0}, Vector3{-1, 0, 0});
   // app->AddSphereObstacle(Vector3{0, 0, 0}, 1.5);
 
-  // Show the gui
-  polyscope::show();
+  if (useGUI) {
+    // Initialize polyscope
+    polyscope::options::autocenterStructures = false;
+    // polyscope::view::windowWidth = 600;
+    // polyscope::view::windowHeight = 800;
+    polyscope::gl::groundPlaneEnabled = false;
+    polyscope::init();
+
+    // Add a few gui elements
+    polyscope::state::userCallback = &customWindow;
+
+    app->DisplayCurves(app->curves, app->curveName);
+
+    // Show the gui
+    polyscope::show();
+  }
+  else if (!useGUI) {
+    LWS::LWSOptions::runTPE = true;
+    app->tpeSolver->SetExponents(LWS::LWSOptions::tpeAlpha, LWS::LWSOptions::tpeBeta);
+
+    bool good_step;
+    while (LWS::LWSOptions::runTPE)
+    {
+      good_step = app->tpeSolver->StepSobolevLS(LWS::LWSOptions::useBarnesHut, app->useBackproj);
+      app->currentStep++;
+
+      // UpdateCurvePositions();
+      if (app->tpeSolver->soboNormZero)
+      {
+        std::cout << "Stopped because flow is (probably) near a local minimum." << std::endl;
+        LWS::LWSOptions::runTPE = false;
+      }
+      if (!good_step)
+      {
+        app->numStuckIterations++;
+        if (app->numStuckIterations >= 5 && app->tpeSolver->TargetLengthReached())
+        {
+          std::cout << "Stopped because flow hasn't made progress in a while." << std::endl;
+          LWS::LWSOptions::runTPE = false;
+        }
+      }
+      else if (app->stepLimit > 0 && app->currentStep >= app->stepLimit)
+      {
+        std::cout << "Stopped because maximum number of steps was reached." << std::endl;
+        LWS::LWSOptions::runTPE = false;
+      }
+      else
+      {
+        app->numStuckIterations = 0;
+      }
+
+      double averageLength = app->curves->TotalLength() / app->curves->NumEdges();
+      if (averageLength > 2 * app->initialAverageLength && app->subdivideCount < app->subdivideLimit)
+      {
+        app->subdivideCount++;
+        app->SubdivideCurve();
+      }
+
+      if (!LWS::LWSOptions::runTPE) {
+        // Export result in obj format
+        LWS::SceneData data = LWS::ParseSceneFile(argv[1]);
+        std::vector<string> parts;
+        LWS::splitString(data.curve_filename, parts, '/');
+        std::string knot_type = parts[4];
+        std::string braid_obj = parts[5];
+        std::string output_file = "./output/" + knot_type + "/" + braid_obj;
+        std::string dummy_tangent_flie = "dummy_tangents.obj";
+
+        std::cout << "Knot type: " << knot_type << std::endl;
+        std::cout << "Braid obj: " << braid_obj << std::endl;
+        std::cout << "output_file: " << output_file << std::endl;
+
+        app->writeCurves(app->curves, output_file, dummy_tangent_flie);
+      }
+    }
+  }
 
   return 0;
 }

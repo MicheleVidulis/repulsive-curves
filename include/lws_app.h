@@ -44,7 +44,7 @@ namespace LWS {
         PolyCurveNetwork* curves;
         TPEFlowSolverSC* tpeSolver;
 
-        private:
+        // private:
         void centerLoopBarycenter(PolyCurveNetwork* curves);
         void UpdateCurvePositions();
         void outputFrame();
